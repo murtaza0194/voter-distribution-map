@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useMapEvents, useMap, Marker, Popup, TileLayer, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
-import { Search, Loader2, MapPin, Navigation } from 'lucide-react';
+import { Search, Loader2, MapPin, Navigation, X } from 'lucide-react';
 import { LocationPoint } from '../types';
 
 // Fix for default Leaflet marker icons in some bundlers
@@ -12,7 +12,7 @@ const DefaultIcon = L.icon({
   iconSize: [25, 41],
   iconAnchor: [12, 41],
   popupAnchor: [0, -34],
-  tooltipAnchor: [0, -38], 
+  tooltipAnchor: [0, -38],
   shadowSize: [41, 41]
 });
 
@@ -23,7 +23,7 @@ const SearchIcon = L.icon({
   iconSize: [25, 41],
   iconAnchor: [12, 41],
   popupAnchor: [0, -34],
-  tooltipAnchor: [0, -38], 
+  tooltipAnchor: [0, -38],
   shadowSize: [41, 41]
 });
 
@@ -37,9 +37,9 @@ export const LocationMarker: React.FC<LocationMarkerProps> = ({ point }) => {
   return (
     <Marker position={[point.lat, point.lng]}>
       {/* Modern Compact Tooltip - Positioned strictly above the marker */}
-      <Tooltip 
-        permanent 
-        direction="top" 
+      <Tooltip
+        permanent
+        direction="top"
         offset={[0, -12]} /* Increased negative offset to push it higher above the pin */
         opacity={1}
         className="custom-tooltip"
@@ -57,14 +57,14 @@ export const LocationMarker: React.FC<LocationMarkerProps> = ({ point }) => {
         <div className="text-right min-w-[160px] p-1 font-sans" dir="rtl">
           <h3 className="font-bold text-lg text-slate-800 mb-1 leading-tight">{point.name}</h3>
           {point.district && (
-             <p className="text-xs text-slate-500 mb-3 pb-2 border-b border-slate-100 flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-emerald-500" />
-                {point.district}
-             </p>
+            <p className="text-xs text-slate-500 mb-3 pb-2 border-b border-slate-100 flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-emerald-500" />
+              {point.district}
+            </p>
           )}
           <div className="flex justify-between items-center bg-slate-50 p-2 rounded-lg">
-             <span className="text-xs text-slate-500">عدد الناخبين</span>
-             <span className="font-bold text-emerald-600 text-base">{point.count.toLocaleString()}</span>
+            <span className="text-xs text-slate-500">عدد الناخبين</span>
+            <span className="font-bold text-emerald-600 text-base">{point.count.toLocaleString()}</span>
           </div>
         </div>
       </Popup>
@@ -82,6 +82,17 @@ export const MapClickHandler: React.FC<MapClickProps> = ({ onMapClick }) => {
       onMapClick(e.latlng.lat, e.latlng.lng);
     },
   });
+  return null;
+};
+
+export const MapInvalidator: React.FC = () => {
+  const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [map]);
   return null;
 };
 
@@ -129,6 +140,7 @@ export const MapSearch: React.FC = () => {
       } else {
         setSuggestions([]);
         setShowSuggestions(false);
+        setSearchResult(null); // Clear the pin when query is cleared
       }
     }, 500);
 
@@ -145,6 +157,14 @@ export const MapSearch: React.FC = () => {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
+  }, []);
+
+  // Prevent map clicks when interacting with search
+  useEffect(() => {
+    if (searchRef.current) {
+      L.DomEvent.disableClickPropagation(searchRef.current);
+      L.DomEvent.disableScrollPropagation(searchRef.current);
+    }
   }, []);
 
   const fetchSuggestions = async (searchQuery: string) => {
@@ -166,10 +186,10 @@ export const MapSearch: React.FC = () => {
   const handleSelectLocation = (result: NominatimResult) => {
     const lat = parseFloat(result.lat);
     const lng = parseFloat(result.lon);
-    
+
     const bounds: L.LatLngBoundsExpression = [
       [parseFloat(result.boundingbox[0]), parseFloat(result.boundingbox[2])],
-      [parseFloat(result.boundingbox[1]), parseFloat(result.boundingbox[3])] 
+      [parseFloat(result.boundingbox[1]), parseFloat(result.boundingbox[3])]
     ];
 
     setSearchResult({
@@ -200,9 +220,16 @@ export const MapSearch: React.FC = () => {
     e.stopPropagation();
   };
 
+  const handleClear = () => {
+    setQuery('');
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setSearchResult(null);
+  };
+
   return (
     <>
-      <div 
+      <div
         ref={searchRef}
         dir="rtl"
         className="absolute top-6 right-6 z-[1000] w-72 sm:w-96 font-sans pointer-events-auto"
@@ -216,12 +243,21 @@ export const MapSearch: React.FC = () => {
             dir="rtl"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onFocus={() => { if(suggestions.length > 0 || isSearching) setShowSuggestions(true); }}
+            onFocus={() => { if (suggestions.length > 0 || isSearching) setShowSuggestions(true); }}
             placeholder="ابحث عن منطقة..."
-            className="w-full pl-12 pr-6 py-3.5 rounded-full border border-white/50 focus:border-emerald-500/50 focus:ring-4 focus:ring-emerald-500/10 shadow-[0_8px_30px_rgb(0,0,0,0.12)] text-sm outline-none bg-white/90 backdrop-blur-xl transition-all text-right placeholder:text-slate-400 text-slate-700"
+            className="w-full pl-20 pr-6 py-3.5 rounded-full border border-white/50 focus:border-emerald-500/50 focus:ring-4 focus:ring-emerald-500/10 shadow-[0_8px_30px_rgb(0,0,0,0.12)] text-sm outline-none bg-white/90 backdrop-blur-xl transition-all text-right placeholder:text-slate-400 text-slate-700"
           />
-          <button 
-            type="submit" 
+          {query.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClear}
+              className="absolute left-12 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-500 p-1.5 rounded-full transition-colors active:bg-slate-100"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+          <button
+            type="submit"
             className="absolute left-2 top-1/2 -translate-y-1/2 bg-emerald-500 text-white p-2 rounded-full hover:bg-emerald-600 transition-all shadow-md hover:shadow-lg active:scale-95"
           >
             {isSearching ? (
@@ -236,14 +272,14 @@ export const MapSearch: React.FC = () => {
         {showSuggestions && (suggestions.length > 0 || isSearching) && (
           <div className="absolute top-full left-0 w-full mt-3 bg-white/95 backdrop-blur-xl rounded-2xl shadow-[0_20px_40px_rgba(0,0,0,0.15)] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200 border border-white/50 ring-1 ring-slate-900/5">
             {isSearching ? (
-               <div className="px-4 py-4 text-center text-slate-500 flex items-center justify-center gap-2 text-sm" dir="rtl">
-                 <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-                 <span>جاري البحث...</span>
-               </div>
+              <div className="px-4 py-4 text-center text-slate-500 flex items-center justify-center gap-2 text-sm" dir="rtl">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+                <span>جاري البحث...</span>
+              </div>
             ) : (
               <ul className="max-h-64 overflow-y-auto custom-scrollbar">
                 {suggestions.map((place) => (
-                  <li 
+                  <li
                     key={place.place_id}
                     onClick={() => handleSelectLocation(place)}
                     className="px-4 py-3 hover:bg-emerald-50/80 cursor-pointer border-b border-slate-50 last:border-0 transition-colors flex items-center gap-3 group"
@@ -256,7 +292,7 @@ export const MapSearch: React.FC = () => {
                         {place.display_name.split(',')[0]}
                       </p>
                       <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-1">
-                         {place.display_name.split(',').slice(1).join(',')}
+                        {place.display_name.split(',').slice(1).join(',')}
                       </p>
                     </div>
                   </li>
@@ -270,16 +306,16 @@ export const MapSearch: React.FC = () => {
       {/* Render Search Result Visualization */}
       {searchResult && (
         <Marker position={[searchResult.lat, searchResult.lng]} icon={SearchIcon}>
-           <Tooltip 
-              permanent 
-              direction="top" 
-              offset={[0, -12]} /* Same offset for search result */
-              opacity={1}
-              className="custom-tooltip"
-            >
-              <div className="bg-red-500 text-white px-2 py-1 rounded-lg shadow-lg text-[10px] font-bold">
-                  {searchResult.name}
-              </div>
+          <Tooltip
+            permanent
+            direction="top"
+            offset={[0, -12]} /* Same offset for search result */
+            opacity={1}
+            className="custom-tooltip"
+          >
+            <div className="bg-red-500 text-white px-2 py-1 rounded-lg shadow-lg text-[10px] font-bold">
+              {searchResult.name}
+            </div>
           </Tooltip>
         </Marker>
       )}
