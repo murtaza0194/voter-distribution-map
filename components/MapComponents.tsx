@@ -85,14 +85,14 @@ export const MapClickHandler: React.FC<MapClickProps> = ({ onMapClick }) => {
   return null;
 };
 
-export const MapInvalidator: React.FC = () => {
+export const MapInvalidator: React.FC<{ trigger?: any }> = ({ trigger }) => {
   const map = useMap();
   useEffect(() => {
     const timer = setTimeout(() => {
       map.invalidateSize();
     }, 200);
     return () => clearTimeout(timer);
-  }, [map]);
+  }, [map, trigger]);
   return null;
 };
 
