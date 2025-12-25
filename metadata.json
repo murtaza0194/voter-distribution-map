@@ -1,0 +1,5 @@
+{
+  "name": "Voter distribution map",
+  "description": "Interactive map application allowing users to plot locations with population counts.",
+  "requestFramePermissions": []
+}
