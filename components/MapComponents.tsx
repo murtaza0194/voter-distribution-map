@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useMapEvents, useMap, Marker, Popup, TileLayer, Tooltip } from 'react-leaflet';
+import { useMapEvents, useMap, Marker, Popup, TileLayer, Tooltip, LayersControl } from 'react-leaflet';
 import L from 'leaflet';
 import { Search, Loader2, MapPin, Navigation, X } from 'lucide-react';
 import { LocationPoint } from '../types';
@@ -98,11 +98,31 @@ export const MapInvalidator: React.FC<{ trigger?: any }> = ({ trigger }) => {
 
 export const BaseMapLayer: React.FC = () => {
   return (
-    <TileLayer
-      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      className="map-tiles"
-    />
+    <LayersControl position="topright">
+      <LayersControl.BaseLayer checked name="OpenStreetMap">
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          className="map-tiles"
+        />
+      </LayersControl.BaseLayer>
+
+      <LayersControl.BaseLayer name="Google Streets">
+        <TileLayer
+          url="http://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
+          subdomains={['mt0', 'mt1', 'mt2', 'mt3']}
+          attribution='&copy; Google Maps'
+        />
+      </LayersControl.BaseLayer>
+
+      <LayersControl.BaseLayer name="Google Satellite (Hybrid)">
+        <TileLayer
+          url="http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}"
+          subdomains={['mt0', 'mt1', 'mt2', 'mt3']}
+          attribution='&copy; Google Maps'
+        />
+      </LayersControl.BaseLayer>
+    </LayersControl>
   );
 };
 
@@ -121,6 +141,7 @@ interface SearchResultState {
   bounds: L.LatLngBoundsExpression;
   name: string;
   place_id: number;
+  display_name: string;
 }
 
 export const MapSearch: React.FC = () => {
@@ -129,7 +150,7 @@ export const MapSearch: React.FC = () => {
   const [suggestions, setSuggestions] = useState<NominatimResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [searchResult, setSearchResult] = useState<SearchResultState | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResultState[]>([]);
   const searchRef = useRef<HTMLDivElement>(null);
 
   // Debounce search
@@ -140,7 +161,10 @@ export const MapSearch: React.FC = () => {
       } else {
         setSuggestions([]);
         setShowSuggestions(false);
-        setSearchResult(null); // Clear the pin when query is cleared
+        // We don't clear searchResults here to keep them on map even if user clears input, 
+        // until they explicitly start a new search or clear.
+        // But if they clear the input, maybe they want to clear? 
+        // Let's keep the results for now as it solves "showing multiple results".
       }
     }, 500);
 
@@ -169,13 +193,120 @@ export const MapSearch: React.FC = () => {
 
   const fetchSuggestions = async (searchQuery: string) => {
     setIsSearching(true);
-    setShowSuggestions(true);
     try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&countrycodes=iq&accept-language=ar&limit=5`
-      );
-      const data = await response.json();
+      const viewbox = "44.14,33.46,44.57,33.19";
+
+      const fetchWithParams = async (q: string, bounded: number) => {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=iq&accept-language=ar&limit=50&viewbox=${viewbox}&bounded=${bounded}`;
+        const res = await fetch(url);
+        return await res.json();
+      };
+
+      const searchOverpass = async (q: string) => {
+        try {
+          // Arabic Orthographic Normalization
+          // Converts specific characters to regex groups to match variations
+          // Alif variants: ا, أ, إ, آ -> [اأإآ]
+          // Teh Marbuta/Ha: ة, ه -> [ةه]
+          // Yeh/Alif Maqsura: ي, ى -> [يى]
+          const normalizeArabic = (text: string) => {
+            return text
+              .replace(/[اأإآ]/g, "[اأإآ]")
+              .replace(/[ةه]/g, "[ةه]")
+              .replace(/[يى]/g, "[يى]");
+          };
+
+          const normalizedQ = normalizeArabic(q);
+
+          // "Deep Search" Implementation
+          // 1. Expanded BBox for Greater Baghdad (Outskirts included)
+          //    South: 33.10, West: 44.00, North: 33.55, East: 44.70
+          const bbox = "33.10,44.00,33.55,44.70";
+
+          // 2. Multilingual Regex Query using Normalized Arabic
+          //    nwr[~"^name(:.*)?|alt_name$"~"${normalizedQ}",i](${bbox});
+          //    Matches any name key or alt_name with the flexible regex pattern
+          const query = `
+                    [out:json][timeout:25];
+                    (
+                      nwr[~"^name(:.*)?|alt_name$"~"${normalizedQ}",i](${bbox});
+                    );
+                    out center;
+                `;
+          const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+          const res = await fetch(url);
+          const data = await res.json();
+
+          // Map Overpass results to Nominatim-like structure
+          return data.elements.map((el: any) => ({
+            place_id: el.id,
+            lat: el.lat || el.center?.lat,
+            lon: el.lon || el.center?.lon,
+            display_name: el.tags?.name || el.tags?.['name:ar'] || el.tags?.['name:en'] || 'Unknown Location',
+            boundingbox: [
+              (el.lat || el.center?.lat) - 0.001,
+              (el.lat || el.center?.lat) + 0.001,
+              (el.lon || el.center?.lon) - 0.001,
+              (el.lon || el.center?.lon) + 0.001
+            ]
+          })).filter((el: any) => el.lat && el.lon);
+        } catch (err) {
+          console.error("Overpass API Error:", err);
+          return [];
+        }
+      };
+
+      // Strategy 1: Strict Search (Nominatim)
+      let data = await fetchWithParams(searchQuery, 1);
+
+      // Strategy 2: Overpass API (Fuzzy Name Search in Baghdad)
+      // If strict Nominatim fails, try scanning OSM directly which is much more powerful for partial matches
+      if (data.length === 0) {
+        console.log("Strict search failed, trying Overpass API...");
+        data = await searchOverpass(searchQuery);
+      }
+
+      // Strategy 3: Relaxed Search (Nominatim Bounded=0)
+      // Only if Overpass also fails (e.g. timeout or no results)
+      if (data.length === 0) {
+        data = await fetchWithParams(searchQuery, 0);
+      }
+
+      // Strategy 4: Smart Tokenizer / Heuristics
+      // Strip common "noise" words to find the core name
+      if (data.length === 0) {
+        // List of words to ignore (School types, genders, distinct attributes)
+        const stopWords = [
+          "school", "high", "secondary", "prep", "preparatory", "primary", "elementary", "kindergarten",
+          "girls", "boys", "mixed", "vocational", "commercial", "industrial", "institute",
+          "مدرسة", "ثانوية", "اعدادية", "متوسطة", "ابتدائية", "روضة", "معهد",
+          "للبنات", "للبنين", "بنات", "بنين", "مختلطة",
+          "المهنية", "الصناعية", "التجارية", "الفنون", "للدراسات", "الأهلية", "الحكومية"
+        ];
+
+        // Create a regex to remove these words (case insensitive, global)
+        const regex = new RegExp(stopWords.join("|"), "gi");
+
+        // Remove stop words and clean up extra spaces
+        const coreName = searchQuery.replace(regex, "").replace(/\s+/g, " ").trim();
+
+        if (coreName && coreName.length >= 3 && coreName !== searchQuery) { // standard check to avoid tiny tokens
+          console.log(`Smart Tokenizer: Reduced '${searchQuery}' to '${coreName}'`);
+          data = await searchOverpass(coreName);
+          if (data.length === 0) data = await fetchWithParams(coreName, 0);
+        }
+      }
+
+      // Strategy 5: Add "مدرسة" prefix if missing (Last resort for simple names)
+      if (data.length === 0) {
+        if (!searchQuery.includes("مدرسة") && !searchQuery.includes("school")) {
+          const enriched = `مدرسة ${searchQuery}`;
+          data = await fetchWithParams(enriched, 1);
+        }
+      }
+
       setSuggestions(data);
+      setShowSuggestions(true);
     } catch (error) {
       console.error("Search error:", error);
     } finally {
@@ -183,36 +314,53 @@ export const MapSearch: React.FC = () => {
     }
   };
 
-  const handleSelectLocation = (result: NominatimResult) => {
+  const mapNominatimResult = (result: NominatimResult): SearchResultState => {
     const lat = parseFloat(result.lat);
     const lng = parseFloat(result.lon);
-
     const bounds: L.LatLngBoundsExpression = [
       [parseFloat(result.boundingbox[0]), parseFloat(result.boundingbox[2])],
       [parseFloat(result.boundingbox[1]), parseFloat(result.boundingbox[3])]
     ];
-
-    setSearchResult({
+    return {
       lat,
       lng,
       bounds,
       name: result.display_name.split(',')[0],
-      place_id: result.place_id
-    });
+      place_id: result.place_id,
+      display_name: result.display_name
+    };
+  };
 
-    map.flyToBounds(bounds, {
+  const handleSelectLocation = (result: NominatimResult) => {
+    const mapped = mapNominatimResult(result);
+    setSearchResults([mapped]); // Only one result if picked specifically
+
+    map.flyToBounds(mapped.bounds, {
       padding: [50, 50],
       duration: 1.5
     });
 
-    setQuery(result.display_name.split(',')[0]);
+    setQuery(mapped.name);
     setShowSuggestions(false);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (suggestions.length > 0) {
-      handleSelectLocation(suggestions[0]);
+      // Show ALL suggestions on map
+      const allResults = suggestions.map(mapNominatimResult);
+      setSearchResults(allResults);
+      setShowSuggestions(false);
+
+      // Calculate bounds for all
+      if (allResults.length > 0) {
+        const group = L.featureGroup(allResults.map(r => L.marker([r.lat, r.lng])));
+        map.flyToBounds(group.getBounds(), { padding: [50, 50], duration: 1.5 });
+      }
+    } else {
+      // Fallback: If no suggestions in state (maybe typed fast and hit enter?), force fetch
+      // (This part is a bit tricky with async, but let's rely on the effect for now or trigger manual fetch)
+      // Ideally we should just rely on the effect having fired.
     }
   };
 
@@ -224,7 +372,7 @@ export const MapSearch: React.FC = () => {
     setQuery('');
     setSuggestions([]);
     setShowSuggestions(false);
-    setSearchResult(null);
+    setSearchResults([]);
   };
 
   return (
@@ -303,22 +451,31 @@ export const MapSearch: React.FC = () => {
         )}
       </div>
 
-      {/* Render Search Result Visualization */}
-      {searchResult && (
-        <Marker position={[searchResult.lat, searchResult.lng]} icon={SearchIcon}>
+      {/* Render Search Results Visualization */}
+      {searchResults.map((result) => (
+        <Marker key={result.place_id} position={[result.lat, result.lng]} icon={SearchIcon}>
           <Tooltip
-            permanent
+            permanent={searchResults.length < 5} // Only show permanent tooltips if few results to avoid clutter
             direction="top"
-            offset={[0, -12]} /* Same offset for search result */
+            offset={[0, -12]}
             opacity={1}
             className="custom-tooltip"
           >
-            <div className="bg-red-500 text-white px-2 py-1 rounded-lg shadow-lg text-[10px] font-bold">
-              {searchResult.name}
+            <div className="bg-red-500 text-white px-2 py-1 rounded-lg shadow-lg text-[10px] font-bold z-[1000]">
+              {result.name}
             </div>
           </Tooltip>
+          <Popup className="modern-popup">
+            <div className="text-right min-w-[160px] p-1 font-sans" dir="rtl">
+              <h3 className="font-bold text-lg text-slate-800 mb-1 leading-tight">{result.name}</h3>
+              <p className="text-xs text-slate-500 mb-3 pb-2 border-b border-slate-100 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-red-500" />
+                {result.display_name}
+              </p>
+            </div>
+          </Popup>
         </Marker>
-      )}
+      ))}
     </>
   );
 };

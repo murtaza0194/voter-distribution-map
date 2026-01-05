@@ -15,7 +15,8 @@ import {
     Square
 } from 'lucide-react';
 import { BaseMapLayer, LocationMarker, MapClickHandler, MapSearch, MapInvalidator } from './components/MapComponents';
-import { LocationPoint } from './types';
+import { VoterManagerModal } from './components/VoterManagerModal';
+import { LocationPoint, Voter } from './types';
 
 const App: React.FC = () => {
     // Initialize state from LocalStorage
@@ -41,6 +42,13 @@ const App: React.FC = () => {
     const [showFilters, setShowFilters] = useState(false);
     const [hiddenPointIds, setHiddenPointIds] = useState<string[]>([]);
     const filterRef = useRef<HTMLDivElement>(null);
+
+    // Voter Management State
+    const [selectedSchoolId, setSelectedSchoolId] = useState<string | null>(null);
+
+    const selectedSchool = useMemo(() =>
+        points.find(p => p.id === selectedSchoolId),
+        [points, selectedSchoolId]);
 
     // Persist points to LocalStorage whenever they change
     useEffect(() => {
@@ -97,6 +105,53 @@ const App: React.FC = () => {
         setName('');
         setDistrict('');
         setCount('');
+    };
+
+    // --- Voter Management Handlers ---
+
+    const handleAddVoter = (fullName: string, phoneNumber: string) => {
+        if (!selectedSchoolId) return;
+
+        const newVoter: Voter = {
+            id: crypto.randomUUID(),
+            fullName,
+            phoneNumber,
+            createdAt: Date.now()
+        };
+
+        setPoints(prev => prev.map(p => {
+            if (p.id === selectedSchoolId) {
+                const updatedVoters = p.voters ? [...p.voters, newVoter] : [newVoter];
+                // Update the count to reflect actual voters if we want, or keep manual count?
+                // The user request said "add unlimited number of person names", implies managing a list.
+                // Let's NOT auto-update the main "count" field yet as that might be "expected capacity" or similar.
+                // Or maybe it should sync? The prompt said "add names of voters in this center ONLY".
+                // Usually "count" in these maps is "Total Voters". 
+                // Let's auto-increment the count when adding a voter if it was manual before?
+                // Actually, let's just add the voter to the list for now. 
+                // Wait, if I add a voter, the count should probably reflect the list size if the list is the source of truth.
+                // But initially the user adds a number manually. 
+                // Let's just track the list side-by-side for now to be safe, or maybe the count IS the list length?
+                // Users might want to just set a number without adding names.
+                // Let's keep `count` independent for now unless user asks to sync.
+                return { ...p, voters: updatedVoters };
+            }
+            return p;
+        }));
+    };
+
+    const handleDeleteVoter = (voterId: string) => {
+        if (!selectedSchoolId) return;
+
+        setPoints(prev => prev.map(p => {
+            if (p.id === selectedSchoolId) {
+                return {
+                    ...p,
+                    voters: p.voters?.filter(v => v.id !== voterId) || []
+                };
+            }
+            return p;
+        }));
     };
 
     // --- Filter Logic (Merged List) ---
@@ -377,7 +432,8 @@ const App: React.FC = () => {
                                             animate={{ opacity: 1, y: 0 }}
                                             exit={{ opacity: 0, x: -100, transition: { duration: 0.2 } }}
                                             key={point.id}
-                                            className="group relative bg-white rounded-3xl p-5 shadow-sm hover:shadow-xl hover:shadow-emerald-900/5 border border-slate-100/80 hover:border-emerald-500/30 transition-colors"
+                                            onClick={() => setSelectedSchoolId(point.id)}
+                                            className="group relative bg-white rounded-3xl p-5 shadow-sm hover:shadow-xl hover:shadow-emerald-900/5 border border-slate-100/80 hover:border-emerald-500/30 transition-all cursor-pointer hover:scale-[1.02]"
                                         >
                                             <div className="flex justify-between items-start">
                                                 <div className="flex-1 min-w-0 pl-4">
@@ -455,6 +511,16 @@ const App: React.FC = () => {
                     )}
                 </main>
             </div>
+
+            {/* Voter Manager Modal */}
+            <VoterManagerModal
+                isOpen={!!selectedSchoolId}
+                onClose={() => setSelectedSchoolId(null)}
+                schoolName={selectedSchool?.name || ''}
+                voters={selectedSchool?.voters || []}
+                onAddVoter={handleAddVoter}
+                onDeleteVoter={handleDeleteVoter}
+            />
         </div>
     );
 };

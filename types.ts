@@ -1,3 +1,10 @@
+export interface Voter {
+  id: string;
+  fullName: string;
+  phoneNumber: string;
+  createdAt: number;
+}
+
 export interface LocationPoint {
   id: string;
   lat: number;
@@ -6,4 +13,5 @@ export interface LocationPoint {
   district: string;
   count: number;
   createdAt: number;
+  voters?: Voter[];
 }
