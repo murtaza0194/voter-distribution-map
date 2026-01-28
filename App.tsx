@@ -41,6 +41,7 @@ const App: React.FC = () => {
     // Filter State
     const [showFilters, setShowFilters] = useState(false);
     const [hiddenPointIds, setHiddenPointIds] = useState<string[]>([]);
+    const [selectedDistrict, setSelectedDistrict] = useState<string>('');
     const filterRef = useRef<HTMLDivElement>(null);
 
     // Voter Management State
@@ -156,10 +157,22 @@ const App: React.FC = () => {
 
     // --- Filter Logic (Merged List) ---
 
-    // Sort points alphabetically for the filter list
-    const sortedPointsForFilter = useMemo(() => {
-        return [...points].sort((a, b) => a.name.localeCompare(b.name));
+    // Extract unique districts from points
+    const uniqueDistricts = useMemo(() => {
+        const districts = points.map(p => p.district).filter((d): d is string => d !== undefined && d.trim() !== '');
+        return Array.from(new Set<string>(districts)).sort((a, b) => a.localeCompare(b));
     }, [points]);
+
+    // Filter points by selected district first
+    const districtFilteredPoints = useMemo(() => {
+        if (!selectedDistrict) return points;
+        return points.filter(p => p.district === selectedDistrict);
+    }, [points, selectedDistrict]);
+
+    // Sort points alphabetically for the filter list (based on district filter)
+    const sortedPointsForFilter = useMemo(() => {
+        return [...districtFilteredPoints].sort((a, b) => a.name.localeCompare(b.name));
+    }, [districtFilteredPoints]);
 
     const togglePointVisibility = (id: string) => {
         setHiddenPointIds(prev =>
@@ -177,8 +190,8 @@ const App: React.FC = () => {
         }
     };
 
-    // Apply filters
-    const filteredPoints = points.filter(p => !hiddenPointIds.includes(p.id));
+    // Apply filters (district + hidden)
+    const filteredPoints = districtFilteredPoints.filter(p => !hiddenPointIds.includes(p.id));
 
     // Default Center - Baghdad, Iraq
     const defaultCenter: [number, number] = [33.3152, 44.3661];
@@ -329,6 +342,9 @@ const App: React.FC = () => {
                                 <p className="text-xs font-semibold text-slate-400 mt-1">
                                     إجمالي المواقع: <span className="text-emerald-600">{filteredPoints.length}</span>
                                 </p>
+                                <p className="text-xs font-semibold text-slate-400 mt-0.5">
+                                    إجمالي الناخبين: <span className="text-emerald-600">{filteredPoints.reduce((sum, p) => sum + p.count, 0).toLocaleString()}</span>
+                                </p>
                             </div>
 
                             <div className="relative" ref={filterRef}>
@@ -350,15 +366,31 @@ const App: React.FC = () => {
                                             exit={{ opacity: 0, scale: 0.9, y: 10 }}
                                             className="absolute top-full left-0 z-50 mt-3 w-80 bg-white/95 backdrop-blur-2xl border border-white/20 rounded-3xl shadow-[0_30px_60px_rgba(0,0,0,0.12)] flex flex-col max-h-[500px] ring-1 ring-black/5"
                                         >
-                                            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-                                                <span className="text-sm font-bold text-slate-800">تصفية النتائج</span>
-                                                <div className="flex gap-2">
-                                                    <button onClick={() => toggleAllPoints(true)} className="p-2 hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors">
-                                                        <CheckSquare className="w-4 h-4" />
-                                                    </button>
-                                                    <button onClick={() => toggleAllPoints(false)} className="p-2 hover:bg-rose-50 text-rose-500 rounded-lg transition-colors">
-                                                        <Square className="w-4 h-4" />
-                                                    </button>
+                                            <div className="p-5 border-b border-slate-100">
+                                                <div className="flex items-center justify-between mb-4">
+                                                    <span className="text-sm font-bold text-slate-800">تصفية النتائج</span>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => toggleAllPoints(true)} className="p-2 hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors">
+                                                            <CheckSquare className="w-4 h-4" />
+                                                        </button>
+                                                        <button onClick={() => toggleAllPoints(false)} className="p-2 hover:bg-rose-50 text-rose-500 rounded-lg transition-colors">
+                                                            <Square className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                {/* District Filter Dropdown */}
+                                                <div className="space-y-1.5">
+                                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">المنطقة</label>
+                                                    <select
+                                                        value={selectedDistrict}
+                                                        onChange={(e) => setSelectedDistrict(e.target.value)}
+                                                        className="w-full px-4 py-2.5 bg-slate-50 border-0 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:bg-white text-slate-700 font-medium transition-all text-sm shadow-inner cursor-pointer"
+                                                    >
+                                                        <option value="">جميع المناطق</option>
+                                                        {uniqueDistricts.map(d => (
+                                                            <option key={d} value={d}>{d}</option>
+                                                        ))}
+                                                    </select>
                                                 </div>
                                             </div>
                                             <div className="overflow-y-auto p-3 space-y-1 custom-scrollbar">
